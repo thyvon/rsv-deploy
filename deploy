@@ -1,0 +1,100 @@
+#!/bin/bash
+# ============================================
+# RSV Tech Solutions - One-Click Deploy
+# ============================================
+# Usage: deploy <project-name> <repo-url> <domain> [port]
+#
+# Examples:
+#   deploy printer-managment https://github.com/user/printer.git printer.rvstechsolution.com
+#   deploy my-app https://github.com/org/app.git app.rvstechsolution.com 8081
+
+set -e
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m'
+
+# Check arguments
+if [ $# -lt 3 ]; then
+    echo -e "${RED}Usage: deploy <project> <repo> <domain> [port]${NC}"
+    echo ""
+    echo "Examples:"
+    echo "  deploy printer-managment https://github.com/user/printer.git printer.rvstechsolution.com"
+    echo "  deploy my-app https://github.com/org/app.git app.rvstechsolution.com 8081"
+    exit 1
+fi
+
+# Arguments
+PROJECT="$1"
+REPO="$2"
+DOMAIN="$3"
+PORT="${4:-8080}"
+
+DIR="/var/www/${PROJECT}"
+TEMPLATE="/opt/rsv-deploy/templates/docker-compose.prod.yml"
+PASSWORD=$(openssl rand -base64 24 | tr -d '/+=' | head -c 24)
+
+echo -e "${BLUE}========================================${NC}"
+echo -e "${BLUE}  RSV Tech Solutions - Deploy${NC}"
+echo -e "${BLUE}========================================${NC}"
+echo ""
+echo -e "  Project:  ${GREEN}${PROJECT}${NC}"
+echo -e "  Domain:   ${GREEN}${DOMAIN}${NC}"
+echo -e "  Port:     ${GREEN}${PORT}${NC}"
+echo ""
+
+# Step 1: Clone
+echo -e "${YELLOW}[1/5]${NC} Getting code..."
+if [ -d "$DIR" ]; then
+    cd "$DIR"
+    git pull origin main 2>/dev/null || git pull origin master 2>/dev/null || true
+else
+    git clone "$REPO" "$DIR"
+    cd "$DIR"
+fi
+
+# Step 2: Create .env
+echo -e "${YELLOW}[2/5]${NC} Creating .env..."
+DB_NAME=$(echo "${PROJECT}" | tr '-' '_')
+cat > .env << EOF
+APP_DOMAIN=${DOMAIN}
+DB_DATABASE=${DB_NAME}_db
+DB_USERNAME=${DB_NAME}
+DB_PASSWORD=${PASSWORD}
+APP_PORT=${PORT}
+EOF
+
+# Step 3: Create docker-compose.prod.yml if missing
+echo -e "${YELLOW}[3/5]${NC} Setting up Docker..."
+if [ ! -f "docker-compose.prod.yml" ]; then
+    cp "$TEMPLATE" docker-compose.prod.yml
+    sed -i "s/\${PROJECT_NAME}/${PROJECT}/g" docker-compose.prod.yml
+fi
+
+# Step 4: Build & Start
+echo -e "${YELLOW}[4/5]${NC} Building containers (this may take a few minutes)..."
+docker compose -f docker-compose.prod.yml --env-file .env up -d --build
+
+# Step 5: Done
+echo -e "${YELLOW}[5/5]${NC} Finalizing..."
+sleep 5
+
+echo ""
+echo -e "${GREEN}========================================${NC}"
+echo -e "${GREEN}  DEPLOYMENT COMPLETE${NC}"
+echo -e "${GREEN}========================================${NC}"
+echo ""
+echo -e "  ${BLUE}Containers:${NC}"
+docker ps --filter "name=${PROJECT}" --format "  {{.Names}}  {{.Status}}"
+echo ""
+echo -e "  ${BLUE}Add in Cloudflare Tunnel:${NC}"
+echo -e "    Hostname: ${DOMAIN}"
+echo -e "    Service:  HTTP"
+echo -e "    URL:      localhost:${PORT}"
+echo ""
+echo -e "  ${YELLOW}DB Password: ${PASSWORD}${NC}"
+echo -e "  ${YELLOW}(Saved in ${DIR}/.env)${NC}"
+echo ""
