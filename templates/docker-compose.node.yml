@@ -1,0 +1,78 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ${PROJECT_NAME}_app
+    restart: unless-stopped
+    ports:
+      - "${APP_PORT:-3000}:3000"
+    environment:
+      - PORT=3000
+      - NODE_ENV=production
+      - JWT_SECRET=${JWT_SECRET}
+      - DB_HOST=${PROJECT_NAME}_db
+      - DB_PORT=3306
+      - DB_USER=root
+      - DB_PASSWORD=${DB_PASSWORD}
+      - DB_NAME=${DB_NAME}
+      - REDIS_HOST=${PROJECT_NAME}_redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=
+      - REDIS_DISABLED=false
+    volumes:
+      - ${PROJECT_NAME}_uploads:/app/uploads
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - ${PROJECT_NAME}_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  db:
+    image: mysql:8.4
+    container_name: ${PROJECT_NAME}_db
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD}
+      MYSQL_DATABASE: ${DB_NAME}
+    volumes:
+      - ${PROJECT_NAME}_mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$${MYSQL_ROOT_PASSWORD} --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - ${PROJECT_NAME}_network
+
+  redis:
+    image: redis:7-alpine
+    container_name: ${PROJECT_NAME}_redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --maxmemory 128mb --maxmemory-policy allkeys-lru
+    volumes:
+      - ${PROJECT_NAME}_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - ${PROJECT_NAME}_network
+
+volumes:
+  ${PROJECT_NAME}_mysql_data:
+  ${PROJECT_NAME}_redis_data:
+  ${PROJECT_NAME}_uploads:
+
+networks:
+  ${PROJECT_NAME}_network:
+    driver: bridge
